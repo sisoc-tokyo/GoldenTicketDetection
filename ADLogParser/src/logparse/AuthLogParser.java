@@ -41,6 +41,9 @@ public class AuthLogParser {
 	// Suspicious command list
 	private List<String> suspiciousCmd = null;
 
+	// admin account white list
+	private List<String> adminWhiteList = null;
+
 	// account name for detection
 	private Set<String> accounts = new LinkedHashSet<String>();
 
@@ -192,11 +195,24 @@ public class AuthLogParser {
 						} else if ((elem.contains("プロセス名:") || elem.contains("Process Name:"))) {
 							// プロセス名は":"が含まれることがあることを考慮
 							processName = parseElement(elem, ":", 2).toLowerCase();
-							if (removeNoise && processName.equals("c:\\windows\\system32\\services.exe")) {
-								// Remove services.exe
-								processName = "";
-								continue;
+							if (removeNoise) {
+								boolean isNoise = false;
+								if (processName.equals("c:\\windows\\system32\\services.exe")) {
+									if(objectName.contains(PSEXESVC)){
+										processName=objectName;
+									} else{
+										isNoise=true;
+									}
+								} else if (processName.equals("c:\\windows\\system32\\lsass.exe")) {
+									isNoise=true;
+								}
+								if (isNoise) {
+									// Remove services.exe
+									processName = "";
+									continue;
+								}
 							}
+
 							// 認証要求元は記録されない
 							clientAddress = "";
 							EventLogData ev = new EventLogData(date, clientAddress, accountName, eventID, clientPort,
@@ -271,7 +287,7 @@ public class AuthLogParser {
 			// アカウントごとに処理する
 			for (String accountName : accounts) {
 				LinkedHashSet<EventLogData> evS = log.get(accountName);
-				if(null==evS){
+				if (null == evS) {
 					continue;
 				}
 				// ソース IPが出ないイベントに、ソースIPをセットする
@@ -383,6 +399,10 @@ public class AuthLogParser {
 			}
 			Set<String> commands = new LinkedHashSet<String>();
 			for (EventLogData ev : evS) {
+				if(!this.adminWhiteList.contains(accountName)){
+					isGolden = 1;
+					ev.setIsGolden(isGolden);
+				}
 				if (5140 == ev.getEventID()) {
 					// 管理共有が使用されている
 					if (ev.getSharedName().contains("\\c$")) {
@@ -521,8 +541,8 @@ public class AuthLogParser {
 					} catch (ParseException e) {
 						e.printStackTrace();
 					}
-					pw.println(ev.getDate()+","+ev.getEventID() + "," + accountName + "," + ev.getClientAddress() + ","
-							+ ev.getServiceName() + "," + ev.getProcessName() + "," + ev.getObjectName() + ","
+					pw.println(ev.getDate() + "," + ev.getEventID() + "," + accountName + "," + ev.getClientAddress()
+							+ "," + ev.getServiceName() + "," + ev.getProcessName() + "," + ev.getObjectName() + ","
 							+ ev.getSharedName() + "," + target);
 				}
 			}
@@ -627,6 +647,32 @@ public class AuthLogParser {
 
 	}
 
+	/**
+	 * Read admin list
+	 * @param inputfilename
+	 */
+	private void readAdminList(String inputfilename) {
+
+		File f = new File(inputfilename);
+		adminWhiteList = new ArrayList<String>();
+		BufferedReader br = null;
+		try {
+			br = new BufferedReader(new FileReader(f));
+			String line;
+			while ((line = br.readLine()) != null) {
+				adminWhiteList.add(line);
+			}
+		} catch (IOException e) {
+			e.printStackTrace();
+		} finally {
+			try {
+				br.close();
+			} catch (IOException e) {
+				e.printStackTrace();
+			}
+		}
+	}
+
 	private void setClientAddress(LinkedHashSet<EventLogData> evS) {
 		List<EventLogData> list = new ArrayList<EventLogData>(evS);
 		// 時刻の昇順に並べる
@@ -658,6 +704,7 @@ public class AuthLogParser {
 		AuthLogParser authLogParser = new AuthLogParser();
 		String inputdirname = "";
 		String commandFile = "";
+		String adminlist = "";
 		if (args.length < 3) {
 			printUseage();
 		} else
@@ -668,10 +715,14 @@ public class AuthLogParser {
 			attackStartTime = sdf.parse(args[3]).getTime();
 		}
 		if (args.length > 4) {
-			removeNoise = Boolean.parseBoolean(args[4]);
+			adminlist = args[4];
+		}
+		if (args.length > 5) {
+			removeNoise = Boolean.parseBoolean(args[5]);
 		}
 		log = new LinkedHashMap<String, LinkedHashSet<EventLogData>>();
 		authLogParser.readSuspiciousCmd(commandFile);
+		authLogParser.readAdminList(adminlist);
 		authLogParser.detelePrevFiles(outputDirName);
 		authLogParser.detectGolden(inputdirname);
 		authLogParser.outputDetectionRate();

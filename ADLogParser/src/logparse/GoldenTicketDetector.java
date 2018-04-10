@@ -50,6 +50,9 @@ public class GoldenTicketDetector {
 
 	// Alert type and message
 	private Map<AlertType, String> alert = null;
+	
+	// admin account white list
+	private List<String> adminWhiteList = null;
 
 	// Suspicious command list
 	private List<String> suspiciousCmd = null;
@@ -636,6 +639,32 @@ public class GoldenTicketDetector {
 		}
 
 	}
+	
+	/**
+	 * Read admin list
+	 * @param inputfilename
+	 */
+	private void readAdminList(String inputfilename) {
+
+		File f = new File(inputfilename);
+		adminWhiteList = new ArrayList<String>();
+		BufferedReader br = null;
+		try {
+			br = new BufferedReader(new FileReader(f));
+			String line;
+			while ((line = br.readLine()) != null) {
+				adminWhiteList.add(line);
+			}
+		} catch (IOException e) {
+			e.printStackTrace();
+		} finally {
+			try {
+				br.close();
+			} catch (IOException e) {
+				e.printStackTrace();
+			}
+		}
+	}
 
 	private void setAlert() {
 		this.alert = new HashMap<AlertType, String>();
@@ -676,6 +705,7 @@ public class GoldenTicketDetector {
 		GoldenTicketDetector GoldenTicketDetector = new GoldenTicketDetector();
 		String inputdirname = "";
 		String commandFile = "";
+		String adminlist = "";
 		if (args.length < 3) {
 			printUseage();
 		} else
@@ -688,6 +718,7 @@ public class GoldenTicketDetector {
 		log = new LinkedHashMap<String, LinkedHashSet<EventLogData>>();
 		GoldenTicketDetector.setAlert();
 		GoldenTicketDetector.readSuspiciousCmd(commandFile);
+		GoldenTicketDetector.readAdminList(adminlist);
 		GoldenTicketDetector.detelePrevFiles(outputDirName);
 		GoldenTicketDetector.detectGolden(inputdirname);
 		GoldenTicketDetector.outputDetectionRate();
