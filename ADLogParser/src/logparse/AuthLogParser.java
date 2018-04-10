@@ -192,8 +192,9 @@ public class AuthLogParser {
 						} else if ((elem.contains("プロセス名:") || elem.contains("Process Name:"))) {
 							// プロセス名は":"が含まれることがあることを考慮
 							processName = parseElement(elem, ":", 2).toLowerCase();
-							if (removeNoise && processName.equals("c:\\\\window\\\\system32\\\\services.exe")) {
+							if (removeNoise && processName.equals("c:\\windows\\system32\\services.exe")) {
 								// Remove services.exe
+								processName = "";
 								continue;
 							}
 							// 認証要求元は記録されない
@@ -248,7 +249,7 @@ public class AuthLogParser {
 			filewriter = new FileWriter(outputFileName, true);
 			bw = new BufferedWriter(filewriter);
 			pw = new PrintWriter(bw);
-			pw.println("eventID,account,ip,service,process,objectname,sharedname,target");
+			pw.println("date,eventID,account,ip,service,process,objectname,sharedname,target");
 
 			// result of merged log based on timeCnt
 			filewriter2 = new FileWriter(outputDirName + "/" + "mergedlog.csv" + "", true);
@@ -270,6 +271,9 @@ public class AuthLogParser {
 			// アカウントごとに処理する
 			for (String accountName : accounts) {
 				LinkedHashSet<EventLogData> evS = log.get(accountName);
+				if(null==evS){
+					continue;
+				}
 				// ソース IPが出ないイベントに、ソースIPをセットする
 				setClientAddress(evS);
 
@@ -517,7 +521,7 @@ public class AuthLogParser {
 					} catch (ParseException e) {
 						e.printStackTrace();
 					}
-					pw.println(ev.getEventID() + "," + accountName + "," + ev.getClientAddress() + ","
+					pw.println(ev.getDate()+","+ev.getEventID() + "," + accountName + "," + ev.getClientAddress() + ","
 							+ ev.getServiceName() + "," + ev.getProcessName() + "," + ev.getObjectName() + ","
 							+ ev.getSharedName() + "," + target);
 				}
