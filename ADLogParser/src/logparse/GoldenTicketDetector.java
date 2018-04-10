@@ -45,7 +45,7 @@ public class GoldenTicketDetector {
 
 	// Alert type
 	protected enum AlertType {
-		NoTGT, MALCMD, ADMINSHARE, PSEXEC
+		NoTGT, MALCMD, ADMINSHARE, PSEXEC,NoADMIN,NONE
 	}
 
 	// Alert type and message
@@ -82,7 +82,7 @@ public class GoldenTicketDetector {
 	// current number of train data
 	private int currentTrainNum = 0;
 	private long id = 0;
-	private static long attackStartTime = 0;
+	//private static long attackStartTime = 0;
 	private int logCnt = 0;
 	private int detectedEventNum = 0;
 	private int dataNum=0;
@@ -206,6 +206,24 @@ public class GoldenTicketDetector {
 						} else if ((elem.contains("プロセス名:") || elem.contains("Process Name:"))) {
 							// プロセス名は":"が含まれることがあることを考慮
 							processName = parseElement(elem, ":", 2).toLowerCase();
+							
+							// Remove noise
+							boolean isNoise = false;
+							if (processName.equals("c:\\windows\\system32\\services.exe")) {
+								if (objectName.contains(PSEXESVC)) {
+									processName = objectName;
+								} else {
+									isNoise = true;
+								}
+							} else if (processName.equals("c:\\windows\\system32\\lsass.exe")) {
+								isNoise = true;
+							}
+							if (isNoise) {
+								// Remove services.exe
+								processName = "";
+								continue;
+							}
+						
 							// 認証要求元は記録されない
 							clientAddress = "";
 							EventLogData ev = new EventLogData(date, clientAddress, accountName, eventID, clientPort,
@@ -280,6 +298,9 @@ public class GoldenTicketDetector {
 			// アカウントごとに処理する
 			for (String accountName : accounts) {
 				LinkedHashSet<EventLogData> evS = log.get(accountName);
+				if (null == evS) {
+					continue;
+				}
 				// ソース IPが出ないイベントに、ソースIPをセットする
 				setClientAddress(evS);
 
@@ -363,6 +384,7 @@ public class GoldenTicketDetector {
 			Map.Entry<String, LinkedHashSet> entry = (Map.Entry<String, LinkedHashSet>) it.next();
 			String computer=entry.getKey();
 			LinkedHashSet<EventLogData> evS = (LinkedHashSet<EventLogData>) entry.getValue();
+			LinkedHashSet<Long> attackTimeCnt=new LinkedHashSet<Long>();
 			for (EventLogData ev : evS) {
 				// 同じアカウント・端末・時間帯のログに同じtimeCntを割り当てる
 				// アカウント・端末を連結させた文字列のハッシュコードとタイムカウントを加算する
@@ -384,17 +406,27 @@ public class GoldenTicketDetector {
 					if (EVENT_ST == ev.getEventID()) {
 						ev.setIsGolden(isGolden);
 						ev.setAlertType(AlertType.NoTGT);
+						ev.setAlertLevel(Alert.SEVERE);
 					}
 				}
 			}
 			Set<String> commands = new LinkedHashSet<String>();
 			for (EventLogData ev : evS) {
+				if(ev.getEventID()==EVENT_PRIV_OPE &&!this.adminWhiteList.contains(accountName) 
+						&& this.adminAccounts.contains(accountName)){
+					// 管理者リストに含まれていないのに、特権を使っている
+					isGolden = 1;
+					ev.setIsGolden(isGolden);
+					ev.setAlertType(AlertType.NoADMIN);
+					ev.setAlertLevel(Alert.SEVERE);
+				}
 				if (5140 == ev.getEventID()) {
 					// 管理共有が使用されている
 					if (ev.getSharedName().contains("\\c$")) {
 						isGolden = 1;
 						ev.setIsGolden(isGolden);
 						ev.setAlertType(AlertType.ADMINSHARE);
+						ev.setAlertLevel(Alert.SEVERE);
 					}
 				} else if (EVENT_PRIV_OPE == ev.getEventID() 
 						|| EVENT_PROCESS == ev.getEventID()) {
@@ -417,6 +449,7 @@ public class GoldenTicketDetector {
 								isGolden = 1;
 								ev.setIsGolden(isGolden);
 								ev.setAlertType(AlertType.PSEXEC);
+								ev.setAlertLevel(Alert.SEVERE);
 							}
 						}
 					}
@@ -434,9 +467,27 @@ public class GoldenTicketDetector {
 				alertLevel = Alert.NOTICE;
 			}
 			for (EventLogData ev : evS) {
-				ev.setAlertLevel(alertLevel);
+				if(ev.getAlertType()==AlertType.MALCMD){
+					ev.setAlertLevel(alertLevel);
+				}
 				if(1==ev.isGolden()){
-					this.detectedEventNum++;
+					if(ev.getClientAddress().isEmpty()) {
+						ev.setIsGolden((short)0);
+						ev.setAlertLevel(Alert.NONE);
+						ev.setAlertType(AlertType.NONE);
+					}else{
+						this.detectedEventNum++;
+						attackTimeCnt.add(ev.getTimeCnt());
+					}
+				}
+			}
+			for (EventLogData ev : evS) {
+				if(attackTimeCnt.contains(ev.getTimeCnt())){
+					if(0==ev.isGolden()){
+						isGolden = 1;
+						ev.setIsGolden(isGolden);
+						this.detectedEventNum++;
+					}
 				}
 			}
 			if(1==isGolden && !accountName.isEmpty() && !computer.isEmpty()){
@@ -512,22 +563,7 @@ public class GoldenTicketDetector {
 				}
 				if (1 == ev.isGolden()) {
 					target = "outlier";
-				} else if (0 != attackStartTime) {
-					// 攻撃開始時刻が指定されている
-					if (logTime < attackStartTime) {
-						// 攻撃開始前は学習用データとする
-						target = "train";
-					} else {
-						// 攻撃開始前はテストデータとする
-						target = "test";
-					}
-				} else if (currentTrainNum <= trainNum) {
-					// 攻撃開始時刻が指定されていない場合は、７：３の割合で分ける
-					target = "train";
-					currentTrainNum++;
-				} else {
-					target = "test";
-				}
+				} 
 
 				// UNIX Timeの計算
 				long time = 0;
@@ -613,9 +649,7 @@ public class GoldenTicketDetector {
 	private static void printUseage() {
 		System.out.println("Useage");
 		System.out.println(
-				"{iputdirpath} {outputdirpath} {suspicious command list file} ({date when attack starts})");
-		System.out.println("If you specity {date when attack starts}, mark logs recoeded after {date when attack starts} as test data. "
-				+ "Date shold be specified 'yyyy/MM/dd HH:mm:ss' format.)");
+				"{iputdirpath} {outputdirpath} {suspicious command list file} ({admin list})");
 	}
 
 	/**
@@ -672,6 +706,7 @@ public class GoldenTicketDetector {
 		alert.put(AlertType.MALCMD, "Malicious Command");
 		alert.put(AlertType.ADMINSHARE, "Administrative Share");
 		alert.put(AlertType.PSEXEC, "Psexec used");
+		alert.put(AlertType.NoADMIN, "Not in Admin list");
 	}
 
 	private void setClientAddress(LinkedHashSet<EventLogData> evS) {
@@ -713,7 +748,7 @@ public class GoldenTicketDetector {
 		outputDirName = args[1];
 		commandFile = args[2];
 		if (args.length > 3) {
-			attackStartTime = sdf.parse(args[3]).getTime();
+			adminlist=args[3];
 		}
 		log = new LinkedHashMap<String, LinkedHashSet<EventLogData>>();
 		GoldenTicketDetector.setAlert();

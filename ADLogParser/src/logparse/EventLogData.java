@@ -16,8 +16,8 @@ public class EventLogData {
 	private String objectName = "";
 	private long timeCnt;
 	private short isGolden=0;
-	private Alert alertLevel;
-	private AlertType alertType;
+	private Alert alertLevel=Alert.NONE;
+	private AlertType alertType=AlertType.NONE;
 	
 	EventLogData(String date, String clientAddress, String accountName, int eventID, int clientPort, String serviceName, 
 			String processName,long timeCnt){

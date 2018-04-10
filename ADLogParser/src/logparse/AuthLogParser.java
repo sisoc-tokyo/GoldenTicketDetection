@@ -65,13 +65,15 @@ public class AuthLogParser {
 	// Data format
 	private static SimpleDateFormat sdf = new SimpleDateFormat("yyyy/MM/dd HH:mm:ss");
 
-	private int trainNum = 0;
+	//private int trainNum = 0;
 	// current number of train data
 	private int currentTrainNum = 0;
 	private long id = 0;
 	private static long attackStartTime = 0;
 	private int logCnt = 0;
-	private int detectedEventNum = 0;
+	private int outlierNum = 0;
+	private int trainNum = 0;
+	private int testNum = 0;
 	private int dataNum = 0;
 	private int infectedNum = 0;
 
@@ -196,15 +198,16 @@ public class AuthLogParser {
 							// プロセス名は":"が含まれることがあることを考慮
 							processName = parseElement(elem, ":", 2).toLowerCase();
 							if (removeNoise) {
+								// Remove noise
 								boolean isNoise = false;
 								if (processName.equals("c:\\windows\\system32\\services.exe")) {
-									if(objectName.contains(PSEXESVC)){
-										processName=objectName;
-									} else{
-										isNoise=true;
+									if (objectName.contains(PSEXESVC)) {
+										processName = objectName;
+									} else {
+										isNoise = true;
 									}
 								} else if (processName.equals("c:\\windows\\system32\\lsass.exe")) {
-									isNoise=true;
+									isNoise = true;
 								}
 								if (isNoise) {
 									// Remove services.exe
@@ -310,7 +313,6 @@ public class AuthLogParser {
 					}
 					evSet.add(ev);
 					kerlog.put(ev.getClientAddress(), evSet);
-					this.logCnt++;
 				}
 
 				for (Iterator it = kerlog.entrySet().iterator(); it.hasNext();) {
@@ -339,8 +341,6 @@ public class AuthLogParser {
 					evSet.add(ev);
 					timeBasedlog.put(ev.getTimeCnt(), evSet);
 				}
-				// Calculate number of train data
-				this.trainNum = Math.round(this.logCnt * this.TRAIN_PERCENTAGE);
 
 				// 結果をファイルに出力する
 				outputLogs(timeBasedlog, accountName);
@@ -374,6 +374,7 @@ public class AuthLogParser {
 			Map.Entry<String, LinkedHashSet> entry = (Map.Entry<String, LinkedHashSet>) it.next();
 			String computer = entry.getKey();
 			LinkedHashSet<EventLogData> evS = (LinkedHashSet<EventLogData>) entry.getValue();
+			LinkedHashSet<Long> attackTimeCnt = new LinkedHashSet<Long>();
 			for (EventLogData ev : evS) {
 				// 同じアカウント・端末・時間帯のログに同じtimeCntを割り当てる
 				// アカウント・端末を連結させた文字列のハッシュコードとタイムカウントを加算する
@@ -399,7 +400,9 @@ public class AuthLogParser {
 			}
 			Set<String> commands = new LinkedHashSet<String>();
 			for (EventLogData ev : evS) {
-				if(!this.adminWhiteList.contains(accountName)){
+				if(ev.getEventID()==EVENT_PRIV_OPE &&!this.adminWhiteList.contains(accountName) 
+						&& this.adminAccounts.contains(accountName)){
+					// 管理者リストに含まれていないのに、特権を使っている
 					isGolden = 1;
 					ev.setIsGolden(isGolden);
 				}
@@ -438,7 +441,15 @@ public class AuthLogParser {
 			double commandExecuterate = (double) detecctcmdCnt / this.detecctTargetcmdCnt;
 			for (EventLogData ev : evS) {
 				if (1 == ev.isGolden()) {
-					this.detectedEventNum++;
+					attackTimeCnt.add(ev.getTimeCnt());
+				}
+			}
+			for (EventLogData ev : evS) {
+				if (attackTimeCnt.contains(ev.getTimeCnt())) {
+					if(0==ev.isGolden()){
+						isGolden = 1;
+						ev.setIsGolden(isGolden);
+					}
 				}
 			}
 			if (1 == isGolden && !accountName.isEmpty() && !computer.isEmpty()) {
@@ -515,25 +526,23 @@ public class AuthLogParser {
 					} catch (ParseException e1) {
 						e1.printStackTrace();
 					}
-					if (1 == ev.isGolden()) {
-						target = "outlier";
-					} else if (0 != attackStartTime) {
+					this.logCnt++;
+					if (0 != attackStartTime) {
 						// 攻撃開始時刻が指定されている
 						if (logTime < attackStartTime) {
 							// 攻撃開始前は学習用データとする
 							target = "train";
-						} else {
-							// 攻撃開始前はテストデータとする
+							this.trainNum++;
+						} else if (1 == ev.isGolden()) {
+							// 異常データ
+							target = "outlier";
+							this.outlierNum++;
+						} else if (logTime >= attackStartTime) {
+							// 攻撃開始後のログはテストデータとする
 							target = "test";
+							this.testNum++;
 						}
-					} else if (currentTrainNum <= trainNum) {
-						// 攻撃開始時刻が指定されていない場合は、７：３の割合で分ける
-						target = "train";
-						currentTrainNum++;
-					} else {
-						target = "test";
 					}
-
 					// UNIX Timeの計算
 					long time = 0;
 					try {
@@ -549,7 +558,7 @@ public class AuthLogParser {
 		}
 
 	}
-
+/*
 	private void outputTimeSeriseLogs(Map<Long, LinkedHashSet> kerlog, String accountName) {
 		long timeCnt = 0;
 		for (Iterator it = kerlog.entrySet().iterator(); it.hasNext();) {
@@ -582,7 +591,7 @@ public class AuthLogParser {
 			timeCnt = entry.getKey();
 		}
 	}
-
+*/
 	/**
 	 * Parse CSV files exported from event log. Detect possibility of attacks
 	 * using Golden Ticket
@@ -649,6 +658,7 @@ public class AuthLogParser {
 
 	/**
 	 * Read admin list
+	 * 
 	 * @param inputfilename
 	 */
 	private void readAdminList(String inputfilename) {
@@ -694,8 +704,9 @@ public class AuthLogParser {
 		System.out.println();
 		System.out.println("Total amount of events: " + this.logCnt);
 		System.out.println("Total amount of accounts & computers: " + this.dataNum);
-		System.out.println("TP(event): " + this.detectedEventNum);
-		System.out.println("TN(event): " + (this.logCnt - this.detectedEventNum));
+		System.out.println("outlier: " + this.outlierNum);
+		System.out.println("train: " + this.trainNum);
+		System.out.println("test: " + this.testNum);
 		System.out.println("TP(accounts & computers): " + this.infectedNum);
 		System.out.println("TN(accounts & computers): " + (this.dataNum - this.infectedNum));
 	}
