@@ -14,6 +14,7 @@ public class EventLogData {
 	private String processName = "";
 	private String shredName = "";
 	private String objectName = "";
+	private String privilege="";
 	private long timeCnt;
 	private short isGolden=0;
 	private Alert alertLevel=Alert.NONE;
@@ -99,5 +100,11 @@ public class EventLogData {
 	}
 	public String getObjectName(){
 		return this.objectName;
+	}
+	public void setPrivilege(String privilege){
+		this.privilege=privilege;
+	}
+	public String getPrivilege(){
+		return this.privilege;
 	}
 }

@@ -97,6 +97,7 @@ public class AuthLogParser {
 			String processName = "";
 			String shredName = "";
 			String objectName = "";
+			String privilege="";
 			boolean isTargetEvent = false;
 
 			// splitする際の上限回数
@@ -106,7 +107,7 @@ public class AuthLogParser {
 			short timeCnt = TIME_CNT;
 			Date baseDate = null;
 			Date logDate = null;
-
+			EventLogData ev=null;
 			while ((line = br.readLine()) != null) {
 				int clientPort = 0;
 				// Remove tab
@@ -175,12 +176,13 @@ public class AuthLogParser {
 						} else if (elem.contains("サービス名:") || elem.contains("Service Name:")) {
 							serviceName = parseElement(elem, ":", limit);
 						} else if (elem.contains("クライアント アドレス:") || elem.contains("Client Address:")
-								|| elem.contains("ソース ネットワーク アドレス:") || elem.contains("送信元アドレス:")) {
+								|| elem.contains("ソース ネットワーク アドレス:") || elem.contains("Source Network Address:")
+								|| elem.contains("送信元アドレス:") || elem.contains("Source Address:")) {
 							elem = elem.replaceAll("::ffff:", "");
 							clientAddress = parseElement(elem, ":", limit);
 
 						} else if ((elem.contains("クライアント ポート:") || elem.contains("Client Port:")
-								|| elem.contains("ソース ポート:"))) {
+								|| elem.contains("ソース ポート:")|| elem.contains("Source Port:"))) {
 							try {
 								clientPort = Integer.parseInt(parseElement(elem, ":", limit));
 							} catch (NumberFormatException e) {
@@ -192,7 +194,7 @@ public class AuthLogParser {
 								// 5140は共有名の情報を取得してから格納する
 								log.put(accountName, evSet);
 							}
-						} else if (elem.contains("オブジェクト名:")) {
+						} else if (elem.contains("オブジェクト名:") || elem.contains("Object Name:")) {
 							objectName = parseElement(elem, ":", 2).toLowerCase();
 						} else if ((elem.contains("プロセス名:") || elem.contains("Process Name:"))) {
 							// プロセス名は":"が含まれることがあることを考慮
@@ -218,21 +220,31 @@ public class AuthLogParser {
 
 							// 認証要求元は記録されない
 							clientAddress = "";
-							EventLogData ev = new EventLogData(date, clientAddress, accountName, eventID, clientPort,
+							 ev = new EventLogData(date, clientAddress, accountName, eventID, clientPort,
 									serviceName, processName, timeCnt);
 							ev.setObjectName(objectName);
-							evSet.add(ev);
-							log.put(accountName, evSet);
+							if(eventID==EVENT_PROCESS || eventID==EVENT_PRIV_SERVICE){
+								evSet.add(ev);
+								log.put(accountName, evSet);
+							}
 							processName = "";
 							objectName = "";
-						} else if (elem.contains("共有名:")) {
-							EventLogData ev = new EventLogData(date, clientAddress, accountName, eventID, clientPort,
+						} else if (elem.contains("共有名:")||elem.contains("Share Name:")) {
+							 ev = new EventLogData(date, clientAddress, accountName, eventID, clientPort,
 									serviceName, processName, timeCnt);
 							shredName = parseElement(elem, ":", 2).toLowerCase();
 							ev.setSharedName(shredName);
 							evSet.add(ev);
 							log.put(accountName, evSet);
 							shredName = "";
+						}  else if (eventID==EVENT_PRIV_OPE && (elem.contains("特権:")||elem.contains("Privileges:"))) {
+							privilege = parseElement(elem, ":", 2).toLowerCase();
+							if(ev!=null){
+								ev.setPrivilege(privilege);
+							}
+							evSet.add(ev);
+							log.put(accountName, evSet);
+							privilege = "";
 						}
 					}
 				}
@@ -268,7 +280,7 @@ public class AuthLogParser {
 			filewriter = new FileWriter(outputFileName, true);
 			bw = new BufferedWriter(filewriter);
 			pw = new PrintWriter(bw);
-			pw.println("date,eventID,account,ip,service,process,objectname,sharedname,target");
+			pw.println("date,eventID,account,ip,service,process,objectname,sharedname,privilage,target");
 
 			// result of merged log based on timeCnt
 			filewriter2 = new FileWriter(outputDirName + "/" + "mergedlog.csv" + "", true);
@@ -552,7 +564,7 @@ public class AuthLogParser {
 					}
 					pw.println(ev.getDate() + "," + ev.getEventID() + "," + accountName + "," + ev.getClientAddress()
 							+ "," + ev.getServiceName() + "," + ev.getProcessName() + "," + ev.getObjectName() + ","
-							+ ev.getSharedName() + "," + target);
+							+ ev.getSharedName() + "," + ev.getPrivilege() + "," + target);
 				}
 			}
 		}
