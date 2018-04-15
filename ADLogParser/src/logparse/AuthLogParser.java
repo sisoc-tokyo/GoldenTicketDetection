@@ -37,6 +37,8 @@ public class AuthLogParser {
 	private static int EVENT_TGT = 4768;
 	private static int EVENT_ST = 4769;
 	private static int EVENT_SHARE = 5140;
+	
+	private final static String SYSTEM_DIR="c:\\windows\\system32";
 
 	// Suspicious command list
 	private List<String> suspiciousCmd = null;
@@ -202,13 +204,13 @@ public class AuthLogParser {
 							if (removeNoise) {
 								// Remove noise
 								boolean isNoise = false;
-								if (processName.equals("c:\\windows\\system32\\services.exe")) {
+								if (processName.equals(SYSTEM_DIR+"\\services.exe")) {
 									if (objectName.contains(PSEXESVC)) {
 										processName = objectName;
 									} else {
 										isNoise = true;
 									}
-								} else if (processName.equals("c:\\windows\\system32\\lsass.exe")) {
+								} else if (processName.equals(SYSTEM_DIR+"\\lsass.exe")) {
 									isNoise = true;
 								}
 								if (isNoise) {
@@ -280,7 +282,7 @@ public class AuthLogParser {
 			filewriter = new FileWriter(outputFileName, true);
 			bw = new BufferedWriter(filewriter);
 			pw = new PrintWriter(bw);
-			pw.println("date,eventID,account,ip,service,process,objectname,sharedname,privilage,target");
+			pw.println("date,eventID,account,ip,service,process,objectname,sharedname,target");
 
 			// result of merged log based on timeCnt
 			filewriter2 = new FileWriter(outputDirName + "/" + "mergedlog.csv" + "", true);
@@ -426,13 +428,18 @@ public class AuthLogParser {
 					}
 				} else if (EVENT_PRIV_SERVICE == ev.getEventID() || EVENT_PRIV_OPE == ev.getEventID()
 						|| EVENT_PROCESS == ev.getEventID()) {
+					// 4673,4674に記録されたプロセスのパスがシステムディレクトリでない
+					if(!ev.getProcessName().contains(SYSTEM_DIR)){
+						isGolden = 1;
+						ev.setIsGolden(isGolden);
+					}
+					String command[] = ev.getProcessName().split("\\\\");
+					String commandName = "";
+					if (null != command) {
+						commandName = command[command.length - 1];
+					}
 					// 攻撃者がよく実行するコマンドを実行している
 					for (String cmd : suspiciousCmd) {
-						String command[] = ev.getProcessName().split("\\\\");
-						String commandName = "";
-						if (null != command) {
-							commandName = command[command.length - 1];
-						}
 						if (commandName.equals(cmd)) {
 							isGolden = 1;
 							ev.setIsGolden(isGolden);
@@ -564,7 +571,7 @@ public class AuthLogParser {
 					}
 					pw.println(ev.getDate() + "," + ev.getEventID() + "," + accountName + "," + ev.getClientAddress()
 							+ "," + ev.getServiceName() + "," + ev.getProcessName() + "," + ev.getObjectName() + ","
-							+ ev.getSharedName() + "," + ev.getPrivilege() + "," + target);
+							+ ev.getSharedName() + "," + target);
 				}
 			}
 		}

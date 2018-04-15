@@ -37,6 +37,8 @@ public class GoldenTicketDetector {
 	private static int EVENT_TGT = 4768;
 	private static int EVENT_ST = 4769;
 	private static int EVENT_SHARE = 5140;
+	
+	private final static String SYSTEM_DIR="c:\\windows\\system32";
 
 	// Alert Level
 	protected enum Alert {
@@ -45,7 +47,7 @@ public class GoldenTicketDetector {
 
 	// Alert type
 	protected enum AlertType {
-		NoTGT, MALCMD, ADMINSHARE, PSEXEC,NoADMIN,NONE
+		NoTGT, MALCMD, ADMINSHARE, PSEXEC,NoADMIN, NoSystemCMD,NONE
 	}
 
 	// Alert type and message
@@ -430,13 +432,20 @@ public class GoldenTicketDetector {
 					}
 				} else if (EVENT_PRIV_OPE == ev.getEventID() 
 						|| EVENT_PROCESS == ev.getEventID()) {
+					// 4673,4674に記録されたプロセスのパスがシステムディレクトリでない
+					if(!ev.getProcessName().contains(SYSTEM_DIR)){
+						isGolden = 1;
+						ev.setIsGolden(isGolden);
+						ev.setAlertType(AlertType.NoSystemCMD);
+						ev.setAlertLevel(Alert.SEVERE);
+					}
 					// 攻撃者がよく実行するコマンドを実行している
+					String command[] = ev.getProcessName().split("\\\\");
+					String commandName = "";
+					if (null != command) {
+						commandName = command[command.length - 1];
+					}
 					for (String cmd : suspiciousCmd) {
-						String command[] = ev.getProcessName().split("\\\\");
-						String commandName = "";
-						if (null != command) {
-							commandName = command[command.length - 1];
-						}
 						if (commandName.equals(cmd)) {
 							isGolden = 1;
 							ev.setIsGolden(isGolden);
@@ -706,6 +715,7 @@ public class GoldenTicketDetector {
 		alert.put(AlertType.MALCMD, "Malicious Command");
 		alert.put(AlertType.ADMINSHARE, "Administrative Share");
 		alert.put(AlertType.PSEXEC, "Psexec used");
+		alert.put(AlertType.NoSystemCMD, "Non system command uses sensitive privilege");
 		alert.put(AlertType.NoADMIN, "Not in Admin list");
 	}
 
