@@ -27,18 +27,11 @@ public class GoldenTicketDetector {
 	private static double ALERT_SEVIRE = 0.85;
 	private static double ALERT_WARNING = 0.2;
 
-	// process name of PSEXESVC
-	private static String PSEXESVC = "psexesvc";
-
 	private static int EVENT_PROCESS = 4688;
 	private static int EVENT_PRIV = 4672;
-	//private static int EVENT_PRIV_SERVICE = 4673;
-	private static int EVENT_PRIV_OPE = 4674;
 	private static int EVENT_TGT = 4768;
 	private static int EVENT_ST = 4769;
 	private static int EVENT_SHARE = 5140;
-	
-	private final static String SYSTEM_DIR="c:\\windows\\system32";
 
 	// Alert Level
 	protected enum Alert {
@@ -70,28 +63,14 @@ public class GoldenTicketDetector {
 	private FileWriter filewriter = null;
 	private BufferedWriter bw = null;
 	private PrintWriter pw = null;
-	private FileWriter filewriter2 = null;
-	private BufferedWriter bw2 = null;
-	private PrintWriter pw2 = null;
-	private FileWriter filewriter3 = null;
-	private BufferedWriter bw3 = null;
-	private PrintWriter pw3 = null;
 
 	// Data format
 	private static SimpleDateFormat sdf = new SimpleDateFormat("yyyy/MM/dd HH:mm:ss");
 
-	private int trainNum = 0;
-	// current number of train data
-	private int currentTrainNum = 0;
-	private long id = 0;
-	//private static long attackStartTime = 0;
 	private int logCnt = 0;
 	private int detectedEventNum = 0;
 	private int dataNum=0;
 	private int infectedNum=0;
-
-	// Parameters for calculate number of train data
-	private static float TRAIN_PERCENTAGE = 0.75f;
 
 	private void readCSV(String filename) {
 
@@ -128,17 +107,16 @@ public class GoldenTicketDetector {
 						date = data[1];
 						eventID = Integer.parseInt(data[3]);
 						if (line.contains(String.valueOf(EVENT_TGT)) || line.contains(String.valueOf(EVENT_ST))
-								|| line.contains(String.valueOf(EVENT_PRIV_OPE))
 								|| line.contains(String.valueOf(EVENT_PRIV))
-								//|| line.contains(String.valueOf(EVENT_PRIV_SERVICE))
 								|| line.contains(String.valueOf(EVENT_PROCESS))
 								|| line.contains(String.valueOf(EVENT_SHARE))) {
 							isTargetEvent = true;
+							
 							try {
 								// Get date
 								logDate = sdf.parse(date);
 								if (EVENT_ST == eventID && null == baseDate) {
-									// this.EVENT_ST を起点として同じ時間帯に出ているログを調べる
+									// this.EVENT_ST を起点として同じ時間帯に出ているログを調べる
 									baseDate = sdf.parse(date);
 									timeCnt--;
 								} else if (null != baseDate) {
@@ -176,6 +154,9 @@ public class GoldenTicketDetector {
 										// 4672はこれ以上情報がないので、アカウント名だけ取得し、管理者アカウントリストに入れる
 										accounts.add(accountName);
 										adminAccounts.add(accountName);
+										evSet.add(new EventLogData(date, "", accountName, eventID, 0,
+												"", "", timeCnt));
+										log.put(accountName, evSet);
 										continue;
 									}else {
 									// extract all users
@@ -186,12 +167,13 @@ public class GoldenTicketDetector {
 						} else if (elem.contains("サービス名:") || elem.contains("Service Name:")) {
 							serviceName = parseElement(elem, ":", limit);
 						} else if (elem.contains("クライアント アドレス:") || elem.contains("Client Address:")
-								|| elem.contains("ソース ネットワーク アドレス:") || elem.contains("送信元アドレス:")) {
+								|| elem.contains("ソース ネットワーク アドレス:") || elem.contains("Source Network Address:")
+								|| elem.contains("送信元アドレス:")|| elem.contains("Source Address:")) {
 							elem = elem.replaceAll("::ffff:", "");
 							clientAddress = parseElement(elem, ":", limit);
 
 						} else if ((elem.contains("クライアント ポート:") || elem.contains("Client Port:")
-								|| elem.contains("ソース ポート:"))) {
+								|| elem.contains("ソース ポート:"))|| elem.contains("Source Port:")) {
 							try {
 								clientPort = Integer.parseInt(parseElement(elem, ":", limit));
 							} catch (NumberFormatException e) {
@@ -203,29 +185,12 @@ public class GoldenTicketDetector {
 								// 5140は共有名の情報を取得してから格納する
 								log.put(accountName, evSet);
 							}
-						} else if (elem.contains("オブジェクト名:")) {
+						} else if (elem.contains("オブジェクト名:")|| elem.contains("Object Name:")) {
 							objectName = parseElement(elem, ":", 2).toLowerCase();
 						} else if ((elem.contains("プロセス名:") || elem.contains("Process Name:"))) {
 							// プロセス名は":"が含まれることがあることを考慮
 							processName = parseElement(elem, ":", 2).toLowerCase();
 							
-							// Remove noise
-							boolean isNoise = false;
-							if (processName.equals("c:\\windows\\system32\\services.exe")) {
-								if (objectName.contains(PSEXESVC)) {
-									processName = objectName;
-								} else {
-									isNoise = true;
-								}
-							} else if (processName.equals("c:\\windows\\system32\\lsass.exe")) {
-								isNoise = true;
-							}
-							if (isNoise) {
-								// Remove services.exe
-								processName = "";
-								continue;
-							}
-						
 							// 認証要求元は記録されない
 							clientAddress = "";
 							EventLogData ev = new EventLogData(date, clientAddress, accountName, eventID, clientPort,
@@ -235,7 +200,7 @@ public class GoldenTicketDetector {
 							log.put(accountName, evSet);
 							processName = "";
 							objectName = "";
-						} else if (elem.contains("共有名:")) {
+						} else if (elem.contains("共有名:")||elem.contains("Share Name:")) {
 							EventLogData ev = new EventLogData(date, clientAddress, accountName, eventID, clientPort,
 									serviceName, processName, timeCnt);
 							shredName = parseElement(elem, ":", 2).toLowerCase();
@@ -278,20 +243,7 @@ public class GoldenTicketDetector {
 			filewriter = new FileWriter(outputFileName, true);
 			bw = new BufferedWriter(filewriter);
 			pw = new PrintWriter(bw);
-			pw.println("date,eventID,account,ip,service,process,objectname,sharedname,target,alerttype,alertlevel");
-
-			// result of merged log based on timeCnt
-			filewriter2 = new FileWriter(outputDirName + "/" + "mergedlog.csv" + "", true);
-			bw2 = new BufferedWriter(filewriter2);
-			pw2 = new PrintWriter(bw2);
-			pw2.println("eventID,account,ip,port,service,process,target");
-
-			// for time series analysis
-			filewriter3 = new FileWriter(outputDirName + "/" + "timeserieslog.csv" + "", true);
-			bw3 = new BufferedWriter(filewriter3);
-			pw3 = new PrintWriter(bw3);
-			pw3.println("id,eventID_p,account_p,ip_p,service_p,process_p,"
-					+ "eventID_c,account_c,ip_c,service_c,process_c,target");
+			pw.println("date,eventID,account,ip,service,process,sharedname,target,alerttype,alertlevel");
 			
 			System.out.println("Infected accounts and computers:");
 
@@ -351,26 +303,15 @@ public class GoldenTicketDetector {
 					evSet.add(ev);
 					timeBasedlog.put(ev.getTimeCnt(), evSet);
 				}
-				// Calculate number of train data
-				this.trainNum = Math.round(this.logCnt * this.TRAIN_PERCENTAGE);
-
 				// 結果をファイルに出力する
 				outputLogs(timeBasedlog, accountName);
-				// time series機械学習用のログを出力する
-				// outputTimeSeriseLogs(timeBasedlog, accountName);
-				// 同じ時間帯のログをマージする
-				// mergeLogs(timeBasedlog, accountName);
 			}
 		} catch (IOException e) {
 			e.printStackTrace();
 		} finally {
 			pw.close();
-			pw2.close();
-			pw3.close();
 			try {
 				bw.close();
-				bw2.close();
-				bw3.close();
 			} catch (IOException e) {
 				e.printStackTrace();
 			}
@@ -388,10 +329,6 @@ public class GoldenTicketDetector {
 			LinkedHashSet<EventLogData> evS = (LinkedHashSet<EventLogData>) entry.getValue();
 			LinkedHashSet<Long> attackTimeCnt=new LinkedHashSet<Long>();
 			for (EventLogData ev : evS) {
-				// 同じアカウント・端末・時間帯のログに同じtimeCntを割り当てる
-				// アカウント・端末を連結させた文字列のハッシュコードとタイムカウントを加算する
-				long timeCnt = (ev.getAccountName() + ev.getClientAddress()).hashCode() + ev.getTimeCnt();
-				ev.settimeCnt(timeCnt);
 				int eventID = ev.getEventID();
 				// 4768/479が記録されているかを調べる
 				if (eventID == 4768) {
@@ -414,7 +351,7 @@ public class GoldenTicketDetector {
 			}
 			Set<String> commands = new LinkedHashSet<String>();
 			for (EventLogData ev : evS) {
-				if(ev.getEventID()==EVENT_PRIV_OPE &&!this.adminWhiteList.contains(accountName) 
+				if(ev.getEventID()==EVENT_PRIV &&!this.adminWhiteList.contains(accountName) 
 						&& this.adminAccounts.contains(accountName)){
 					// 管理者リストに含まれていないのに、特権を使っている
 					isGolden = 1;
@@ -430,15 +367,7 @@ public class GoldenTicketDetector {
 						ev.setAlertType(AlertType.ADMINSHARE);
 						ev.setAlertLevel(Alert.SEVERE);
 					}
-				} else if (EVENT_PRIV_OPE == ev.getEventID() 
-						|| EVENT_PROCESS == ev.getEventID()) {
-					// 4673,4674に記録されたプロセスのパスがシステムディレクトリでない
-					if(!ev.getProcessName().contains(SYSTEM_DIR)){
-						isGolden = 1;
-						ev.setIsGolden(isGolden);
-						ev.setAlertType(AlertType.NoSystemCMD);
-						ev.setAlertLevel(Alert.SEVERE);
-					}
+				} else if (EVENT_PROCESS == ev.getEventID()) {
 					// 攻撃者がよく実行するコマンドを実行している
 					String command[] = ev.getProcessName().split("\\\\");
 					String commandName = "";
@@ -451,15 +380,6 @@ public class GoldenTicketDetector {
 							ev.setIsGolden(isGolden);
 							ev.setAlertType(AlertType.MALCMD);
 							commands.add(ev.getProcessName());
-						}
-						if (EVENT_PRIV_OPE == ev.getEventID()) {
-							// psexecが実行されている
-							if (ev.getObjectName().contains(this.PSEXESVC)) {
-								isGolden = 1;
-								ev.setIsGolden(isGolden);
-								ev.setAlertType(AlertType.PSEXEC);
-								ev.setAlertLevel(Alert.SEVERE);
-							}
 						}
 					}
 				}
@@ -480,21 +400,11 @@ public class GoldenTicketDetector {
 					ev.setAlertLevel(alertLevel);
 				}
 				if(1==ev.isGolden()){
-					if(ev.getClientAddress().isEmpty()) {
+					if(ev.getClientAddress().isEmpty() && ev.getEventID()!=EVENT_PRIV) {
 						ev.setIsGolden((short)0);
 						ev.setAlertLevel(Alert.NONE);
 						ev.setAlertType(AlertType.NONE);
-					}else{
-						this.detectedEventNum++;
-						attackTimeCnt.add(ev.getTimeCnt());
-					}
-				}
-			}
-			for (EventLogData ev : evS) {
-				if(attackTimeCnt.contains(ev.getTimeCnt())){
-					if(0==ev.isGolden()){
-						isGolden = 1;
-						ev.setIsGolden(isGolden);
+					} else{
 						this.detectedEventNum++;
 					}
 				}
@@ -505,64 +415,12 @@ public class GoldenTicketDetector {
 			}
 		}
 	}
-
-	private void mergeLogs(Map<Long, LinkedHashSet> kerlog, String accountName) {
-		for (Iterator it = kerlog.entrySet().iterator(); it.hasNext();) {
-			Map.Entry<Long, LinkedHashSet> entry = (Map.Entry<Long, LinkedHashSet>) it.next();
-			LinkedHashSet<EventLogData> evS = (LinkedHashSet<EventLogData>) entry.getValue();
-			Map<String, LinkedHashSet> map = new LinkedHashMap<String, LinkedHashSet>();
-			LinkedHashSet<EventLogData> set = null;
-			// 端末毎に分類する
-			String clientAddress = "";
-			for (EventLogData ev : evS) {
-				if (!ev.getClientAddress().isEmpty()) {
-					if (null != map.get(ev.getClientAddress())) {
-						set = map.get(ev.getClientAddress());
-					} else {
-						set = new LinkedHashSet<EventLogData>();
-					}
-				} else {
-					// 端末情報が出ないログは、直前に処理した端末と同じとみなす
-					if (null != map.get(ev.getClientAddress())) {
-						set = map.get(clientAddress);
-					} else {
-						set = new LinkedHashSet<EventLogData>();
-					}
-				}
-				set.add(ev);
-				map.put(ev.getClientAddress(), set);
-			}
-			// 同じtimeCnt,IPのデータをマージする
-			String event = "";
-			int clientPort = 0;
-			String serviceName = "";
-			String processName = "";
-			short isGolden = 0;
-			for (Iterator itTerm = map.entrySet().iterator(); itTerm.hasNext();) {
-				Map.Entry<String, LinkedHashSet> entryTerm = (Map.Entry<String, LinkedHashSet>) itTerm.next();
-				clientAddress = entryTerm.getKey();
-				LinkedHashSet<EventLogData> evSTerm = (LinkedHashSet<EventLogData>) entryTerm.getValue();
-				for (EventLogData ev : evS) {
-					event = event += String.valueOf(ev.getEventID());
-					clientPort = clientPort += ev.getClientPort();
-					serviceName = serviceName += ev.getServiceName();
-					processName = processName += ev.getProcessName();
-					if (1 == ev.isGolden()) {
-						isGolden = ev.isGolden();
-					}
-				}
-				pw2.println(event + ", " + accountName + "," + clientAddress + ", " + clientPort + ", " + serviceName
-						+ ", " + processName + ", " + isGolden);
-			}
-		}
-
-	}
-
+	
 	private void outputLogs(Map<Long, LinkedHashSet> kerlog, String accountName) {
 		for (Iterator it = kerlog.entrySet().iterator(); it.hasNext();) {
 			Map.Entry<Long, LinkedHashSet> entry = (Map.Entry<Long, LinkedHashSet>) it.next();
 			LinkedHashSet<EventLogData> evS = (LinkedHashSet<EventLogData>) entry.getValue();
-			String target = "";
+
 			long logTime = 0;
 			for (EventLogData ev : evS) {
 				try {
@@ -570,9 +428,6 @@ public class GoldenTicketDetector {
 				} catch (ParseException e1) {
 					e1.printStackTrace();
 				}
-				if (1 == ev.isGolden()) {
-					target = "outlier";
-				} 
 
 				// UNIX Timeの計算
 				long time = 0;
@@ -582,45 +437,12 @@ public class GoldenTicketDetector {
 					e.printStackTrace();
 				}
 				pw.println(ev.getDate() + "," + ev.getEventID() + "," + accountName + "," + ev.getClientAddress() + ","
-						+ ev.getServiceName() + "," + ev.getProcessName() + "," + ev.getObjectName() + ","
-						+ ev.getSharedName() + "," + target + "," + this.alert.get(ev.getAlertType()) + ","
+						+ ev.getServiceName() + "," + ev.getProcessName() + "," 
+						+ ev.getSharedName() + "," + ev.isGolden() + "," + this.alert.get(ev.getAlertType()) + ","
 						+ ev.getAlertLevel());
 			}
 		}
 
-	}
-
-	private void outputTimeSeriseLogs(Map<Long, LinkedHashSet> kerlog, String accountName) {
-		long timeCnt = 0;
-		for (Iterator it = kerlog.entrySet().iterator(); it.hasNext();) {
-			Map.Entry<Long, LinkedHashSet> entry = (Map.Entry<Long, LinkedHashSet>) it.next();
-			LinkedHashSet<EventLogData> evS = (LinkedHashSet<EventLogData>) entry.getValue();
-			String target = "";
-			EventLogData prevEv = null;
-			for (EventLogData ev : evS) {
-				if (1 == ev.isGolden()) {
-					target = "outlier";
-				} else if (currentTrainNum <= trainNum || timeCnt == ev.getTimeCnt()) {
-					target = "train";
-					currentTrainNum++;
-				} else {
-					target = "test";
-				}
-				this.id++;
-				pw3.print(this.id + ",");
-				if (null == prevEv) {
-					pw3.print("-,-,-,-,-");
-				} else {
-					pw3.print(prevEv.getEventID() + "," + accountName + "," + prevEv.getClientAddress() + ","
-							+ prevEv.getServiceName() + "," + prevEv.getProcessName());
-				}
-				pw3.println("," + ev.getEventID() + "," + accountName + "," + ev.getClientAddress() + ","
-						+ ev.getServiceName() + "," + ev.getProcessName() + "," + target);
-				prevEv = new EventLogData(ev.getDate(), ev.getClientAddress(), accountName, ev.getEventID(),
-						ev.getClientPort(), ev.getServiceName(), ev.getProcessName(), ev.getTimeCnt());
-			}
-			timeCnt = entry.getKey();
-		}
 	}
 
 	/**
@@ -727,8 +549,7 @@ public class GoldenTicketDetector {
 		for (EventLogData ev : list) {
 			if (ev.getEventID() == EVENT_ST) {
 				clientAddress = ev.getClientAddress();
-			} else if (ev.getEventID() == EVENT_PRIV_OPE 
-					|| ev.getEventID() == EVENT_PROCESS) {
+			} else if (ev.getEventID() == EVENT_PROCESS) {
 				if(!clientAddress.isEmpty()){
 					ev.setClientAddress(clientAddress);
 				}

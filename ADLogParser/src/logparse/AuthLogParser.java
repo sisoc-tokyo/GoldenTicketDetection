@@ -9,7 +9,7 @@ import java.text.*;
 import java.util.*;
 
 /**
- * Golden Ticket detection using Windows Event log.
+ * Golden Ticket detection using Windows Event log 4674.
  * 
  * @version 1.0
  * @author Mariko Fujimoto
@@ -22,10 +22,6 @@ public class AuthLogParser {
 
 	// Initial value for timeCnt
 	private static short TIME_CNT = Short.MAX_VALUE;
-
-	// Command execution rate for alert
-	private static double ALERT_SEVIRE = 0.85;
-	private static double ALERT_WARNING = 0.2;
 
 	// process name of PSEXESVC
 	private static String PSEXESVC = "psexesvc";
@@ -57,20 +53,10 @@ public class AuthLogParser {
 	private FileWriter filewriter = null;
 	private BufferedWriter bw = null;
 	private PrintWriter pw = null;
-	private FileWriter filewriter2 = null;
-	private BufferedWriter bw2 = null;
-	private PrintWriter pw2 = null;
-	private FileWriter filewriter3 = null;
-	private BufferedWriter bw3 = null;
-	private PrintWriter pw3 = null;
 
 	// Data format
 	private static SimpleDateFormat sdf = new SimpleDateFormat("yyyy/MM/dd HH:mm:ss");
 
-	//private int trainNum = 0;
-	// current number of train data
-	private int currentTrainNum = 0;
-	private long id = 0;
 	private static long attackStartTime = 0;
 	private int logCnt = 0;
 	private int outlierNum = 0;
@@ -81,8 +67,6 @@ public class AuthLogParser {
 
 	private static boolean removeNoise = false;
 
-	// Parameters for calculate number of train data
-	private static float TRAIN_PERCENTAGE = 0.75f;
 
 	private void readCSV(String filename) {
 
@@ -284,19 +268,6 @@ public class AuthLogParser {
 			pw = new PrintWriter(bw);
 			pw.println("date,eventID,account,ip,service,process,objectname,sharedname,target");
 
-			// result of merged log based on timeCnt
-			filewriter2 = new FileWriter(outputDirName + "/" + "mergedlog.csv" + "", true);
-			bw2 = new BufferedWriter(filewriter2);
-			pw2 = new PrintWriter(bw2);
-			pw2.println("eventID,account,ip,port,service,process,target");
-
-			// for time series analysis
-			filewriter3 = new FileWriter(outputDirName + "/" + "timeserieslog.csv" + "", true);
-			bw3 = new BufferedWriter(filewriter3);
-			pw3 = new PrintWriter(bw3);
-			pw3.println("id,eventID_p,account_p,ip_p,service_p,process_p,"
-					+ "eventID_c,account_c,ip_c,service_c,process_c,target");
-
 			System.out.println("Infected accounts and computers:");
 
 			ArrayList<EventLogData> list = null;
@@ -334,13 +305,11 @@ public class AuthLogParser {
 					String computer = entry.getKey();
 					if (!accountName.isEmpty() && !computer.isEmpty()) {
 						this.dataNum++;
-						// System.out.println("Account: "+accountName+",
-						// Computer: "+computer);
 					}
 				}
-				// GTが使われているか判定
+				// 異常値どうかか判定
 				if (adminAccounts.contains(accountName)) {
-					isGoldenUsed(kerlog, accountName);
+					isOutlier(kerlog, accountName);
 				}
 				// 同じ時間帯のログごとに処理
 				list = new ArrayList<EventLogData>(evS);
@@ -358,28 +327,20 @@ public class AuthLogParser {
 
 				// 結果をファイルに出力する
 				outputLogs(timeBasedlog, accountName);
-				// time series機械学習用のログを出力する
-				// outputTimeSeriseLogs(timeBasedlog, accountName);
-				// 同じ時間帯のログをマージする
-				// mergeLogs(timeBasedlog, accountName);
 			}
 		} catch (IOException e) {
 			e.printStackTrace();
 		} finally {
 			pw.close();
-			pw2.close();
-			pw3.close();
 			try {
 				bw.close();
-				bw2.close();
-				bw3.close();
 			} catch (IOException e) {
 				e.printStackTrace();
 			}
 		}
 	}
 
-	private void isGoldenUsed(Map<String, LinkedHashSet> kerlog, String accountName) {
+	private void isOutlier(Map<String, LinkedHashSet> kerlog, String accountName) {
 		// kerlogは端末毎に分類されたログ
 		for (Iterator it = kerlog.entrySet().iterator(); it.hasNext();) {
 			boolean isTGTEvent = false;
@@ -395,7 +356,7 @@ public class AuthLogParser {
 				long timeCnt = (ev.getAccountName() + ev.getClientAddress()).hashCode() + ev.getTimeCnt();
 				ev.settimeCnt(timeCnt);
 				int eventID = ev.getEventID();
-				// 4768/479が記録されているかを調べる
+				// 4768/4769が記録されているかを調べる
 				if (eventID == 4768) {
 					isTGTEvent = true;
 				} else if (eventID == EVENT_ST) {
@@ -455,9 +416,6 @@ public class AuthLogParser {
 					}
 				}
 			}
-			// 実行された不審なコマンドの種類数
-			int detecctcmdCnt = commands.size();
-			double commandExecuterate = (double) detecctcmdCnt / this.detecctTargetcmdCnt;
 			for (EventLogData ev : evS) {
 				if (1 == ev.isGolden()) {
 					attackTimeCnt.add(ev.getTimeCnt());
@@ -478,6 +436,7 @@ public class AuthLogParser {
 		}
 	}
 
+	// not used now
 	private void mergeLogs(Map<Long, LinkedHashSet> kerlog, String accountName) {
 		for (Iterator it = kerlog.entrySet().iterator(); it.hasNext();) {
 			Map.Entry<Long, LinkedHashSet> entry = (Map.Entry<Long, LinkedHashSet>) it.next();
@@ -523,8 +482,6 @@ public class AuthLogParser {
 						isGolden = ev.isGolden();
 					}
 				}
-				pw2.println(event + ", " + accountName + "," + clientAddress + ", " + clientPort + ", " + serviceName
-						+ ", " + processName + ", " + isGolden);
 			}
 		}
 
@@ -612,8 +569,7 @@ public class AuthLogParser {
 	}
 */
 	/**
-	 * Parse CSV files exported from event log. Detect possibility of attacks
-	 * using Golden Ticket
+	 * Judge whether the log is outlier
 	 * 
 	 * @param inputDirname
 	 */
@@ -650,7 +606,8 @@ public class AuthLogParser {
 		System.out.println(
 				"If you specity {date when attack starts}, mark logs recoeded after {date when attack starts} as test data. "
 						+ "Date shold be specified 'yyyy/MM/dd HH:mm:ss' format.)");
-		System.out.println("If you specify 'true', noise will be removed.");
+		System.out.println(
+				"If you specity 'true', remove noise log(service.exe etc) for detection");
 	}
 
 	/**
@@ -742,7 +699,12 @@ public class AuthLogParser {
 		outputDirName = args[1];
 		commandFile = args[2];
 		if (args.length > 3) {
+			try{
 			attackStartTime = sdf.parse(args[3]).getTime();
+			} catch (ParseException e) {
+				System.out.println("Date shold be specified 'yyyy/MM/dd HH:mm:ss' format.");
+				throw(e);
+			}
 		}
 		if (args.length > 4) {
 			adminlist = args[4];
