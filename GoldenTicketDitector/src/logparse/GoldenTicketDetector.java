@@ -319,7 +319,20 @@ public class GoldenTicketDetector {
 			Map.Entry<String, LinkedHashSet> entry = (Map.Entry<String, LinkedHashSet>) it.next();
 			String computer=entry.getKey();
 			LinkedHashSet<EventLogData> evS = (LinkedHashSet<EventLogData>) entry.getValue();
-			LinkedHashSet<Long> attackTimeCnt=new LinkedHashSet<Long>();
+			LinkedHashMap<Long,Alert> attackTimeCnt = new LinkedHashMap<Long,Alert>();
+			for (EventLogData ev : evS) {
+				// 同じアカウント・端末・時間帯のログに同じtimeCntを割り当てる
+				// アカウント・端末を連結させた文字列のハッシュコードとタイムカウントを加算する
+				long timeCnt = (ev.getAccountName() + ev.getClientAddress()).hashCode() + ev.getTimeCnt();
+				ev.settimeCnt(timeCnt);
+				int eventID = ev.getEventID();
+				// 4768/4769が記録されているかを調べる
+				if (eventID == 4768) {
+					isTGTEvent = true;
+				} else if (eventID == EVENT_ST) {
+					isSTEvent = true;
+				}
+			}
 			for (EventLogData ev : evS) {
 				int eventID = ev.getEventID();
 				// 4768/479が記録されているかを調べる
@@ -341,8 +354,10 @@ public class GoldenTicketDetector {
 					}
 				}
 			}
+			
 			Set<String> commands = new LinkedHashSet<String>();
 			for (EventLogData ev : evS) {
+				
 				if(ev.getEventID()==EVENT_PRIV &&!this.adminWhiteList.contains(accountName) 
 						&& this.adminAccounts.contains(accountName)){
 					// 管理者リストに含まれていないのに、特権を使っている
@@ -351,6 +366,7 @@ public class GoldenTicketDetector {
 					ev.setAlertType(AlertType.NoADMIN);
 					ev.setAlertLevel(Alert.SEVERE);
 				}
+				
 				if (5140 == ev.getEventID()) {
 					// 管理共有が使用されている
 					if (ev.getSharedName().contains("\\c$")) {
@@ -359,7 +375,8 @@ public class GoldenTicketDetector {
 						ev.setAlertType(AlertType.ADMINSHARE);
 						ev.setAlertLevel(Alert.SEVERE);
 					}
-				} else if (EVENT_PROCESS == ev.getEventID()) {
+				}
+				if (EVENT_PROCESS == ev.getEventID()) {
 					// 攻撃者がよく実行するコマンドを実行している
 					String command[] = ev.getProcessName().split("\\\\");
 					String commandName = "";
@@ -375,6 +392,7 @@ public class GoldenTicketDetector {
 						}
 					}
 				}
+				
 			}
 			// 実行された不審なコマンドの種類数
 			int detecctcmdCnt = commands.size();
@@ -398,6 +416,26 @@ public class GoldenTicketDetector {
 						ev.setAlertType(AlertType.NONE);
 					} else{
 						this.detectedEventNum++;
+					}
+				}
+			}
+			//outlierと判定したログと同時刻のログをマークし、同じアラートレベルを設定する
+			for (EventLogData ev : evS) {
+				if (1 == ev.isGolden()) {
+					attackTimeCnt.put(ev.getTimeCnt(),ev.getAlertLevel());
+					if(ev.getAlertLevel()==Alert.NONE){
+						ev.setAlertLevel(alertLevel);
+					}
+				}
+			}
+			for (EventLogData ev : evS) {
+				if (null!=attackTimeCnt.get(ev.getTimeCnt())) {
+					if(0==ev.isGolden()){
+						isGolden = 1;
+						ev.setIsGolden(isGolden);
+					}
+					if(ev.getAlertLevel()==Alert.NONE){
+						ev.setAlertLevel(attackTimeCnt.get(ev.getTimeCnt()));
 					}
 				}
 			}
@@ -433,6 +471,7 @@ public class GoldenTicketDetector {
 						+ ev.getSharedName() + "," + ev.isGolden() + "," + this.alert.get(ev.getAlertType()) + ","
 						+ ev.getAlertLevel());
 			}
+			
 		}
 
 	}
